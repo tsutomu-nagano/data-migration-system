@@ -1,6 +1,18 @@
 "use client"
 
-import { AlertCircle, CircleCheck, CircleDashed, Database, XCircle } from "lucide-react"
+import {
+  AlertCircle,
+  Calculator,
+  CalendarDays,
+  CircleCheck,
+  CircleDashed,
+  Database,
+  MapPin,
+  Ruler,
+  Tags,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react"
 import { useMemo } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -8,12 +20,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { useMigration } from "@/lib/migration/store"
-import type { MigrationDecision, ReadinessStatus } from "@/lib/migration/types"
+import type { MatterCategory, MigrationDecision, ReadinessStatus } from "@/lib/migration/types"
 
 const STATUS_LABELS: Record<ReadinessStatus, string> = {
   ready: "移行可能",
   partial: "マッピング未完了",
   blocked: "参照メタデータ不足",
+}
+
+const MATTER_CATEGORY_ICONS: Record<MatterCategory, LucideIcon> = {
+  分類事項: Tags,
+  地域事項: MapPin,
+  時間軸事項: CalendarDays,
+  集計事項: Calculator,
+  単位事項: Ruler,
 }
 
 export function StatDataMigration() {
@@ -115,6 +135,7 @@ export function StatDataMigration() {
                       {referencedMatters.map((matter) => {
                         const missing = readiness.missingMatterIds.includes(matter.id)
                         const unmapped = readiness.unmappedMatterIds.includes(matter.id)
+                        const MatterIcon = MATTER_CATEGORY_ICONS[matter.category]
                         return (
                           <div
                             key={matter.id}
@@ -123,8 +144,11 @@ export function StatDataMigration() {
                               missing || unmapped ? "border-destructive/30 bg-destructive/5" : "bg-muted/30",
                             )}
                           >
-                            <span className="min-w-0 truncate">
-                              {matter.category}: {matter.name}
+                            <span className="flex min-w-0 items-center gap-2">
+                              <MatterIcon className="size-4 shrink-0 text-primary" />
+                              <span className="min-w-0 truncate">
+                                {matter.category}: {matter.name}
+                              </span>
                             </span>
                             {missing ? (
                               <Badge variant="destructive">未移行</Badge>
