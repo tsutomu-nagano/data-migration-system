@@ -1,0 +1,21 @@
+services:
+  app:
+    image: node:24
+    container_name: migration
+
+    stdin_open: true
+    tty: true
+
+    # env_file:
+    #   - .env
+    #   - .env.local
+
+    ports:
+      - 3003:3000
+
+    volumes:
+      - .:/home
+
+    working_dir: /home
+
+    command: "/bin/bash"
