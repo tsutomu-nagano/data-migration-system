@@ -7,6 +7,7 @@ import { GeneratedOutput } from "@/components/views/generated-output"
 import { ItemMapping } from "@/components/views/item-mapping"
 import { MatterReferences } from "@/components/views/matter-references"
 import { MattersOverview } from "@/components/views/matters-overview"
+import { StatDataMigration } from "@/components/views/stat-data-migration"
 import { MigrationProvider } from "@/lib/migration/store"
 import type { ViewKey } from "@/lib/migration/views"
 
@@ -34,6 +35,7 @@ export default function Page() {
             )}
             {view === "common-meta" && <CommonMetaView />}
             {view === "references" && <MatterReferences />}
+            {view === "data-migration" && <StatDataMigration />}
             {view === "output" && <GeneratedOutput />}
           </div>
         </main>

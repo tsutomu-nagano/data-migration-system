@@ -5,6 +5,7 @@ import {
   FileJson,
   GitCompareArrows,
   LayoutGrid,
+  ListChecks,
   RotateCcw,
   Workflow,
 } from "lucide-react"
@@ -19,6 +20,7 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof LayoutGrid; desc: s
   { key: "mapping", label: "項目マッピング", icon: GitCompareArrows, desc: "新項目の作成" },
   { key: "common-meta", label: "共通メタ", icon: Database, desc: "共通概念の参照" },
   { key: "references", label: "事項間参照", icon: Workflow, desc: "参照関係の定義" },
+  { key: "data-migration", label: "統計データ移行", icon: ListChecks, desc: "移行対象表の選択" },
   { key: "output", label: "生成パラメータ", icon: FileJson, desc: "移行用パラメータ" },
 ]
 

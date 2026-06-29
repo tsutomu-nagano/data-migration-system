@@ -162,7 +162,6 @@ export function MigrationProvider({ children }: { children: ReactNode }) {
       const decision = tableDecisions[tableId] ?? "auto"
       let willMigrate: boolean
       if (decision === "exclude") willMigrate = false
-      else if (decision === "include") willMigrate = status !== "blocked"
       else willMigrate = status === "ready"
 
       return { tableId, status, missingMatterIds, unmappedMatterIds, willMigrate }

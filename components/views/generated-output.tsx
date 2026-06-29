@@ -11,7 +11,15 @@ import { useMigration } from "@/lib/migration/store"
 import { commonMetaLabel } from "@/lib/migration/types"
 
 export function GeneratedOutput() {
-  const { oldMatters, commonMeta, matterMappings, itemMappings, matterRefs } = useMigration()
+  const {
+    oldMatters,
+    commonMeta,
+    statTables,
+    matterMappings,
+    itemMappings,
+    matterRefs,
+    getTableReadiness,
+  } = useMigration()
   const [copied, setCopied] = useState(false)
 
   const output = useMemo(() => {
@@ -68,20 +76,33 @@ export function GeneratedOutput() {
       toMatterId: `NEW_${r.toMatterId}`,
     }))
 
+    const statData = statTables
+      .filter((table) => getTableReadiness(table.id).willMigrate)
+      .map((table) => ({
+        id: table.id,
+        name: table.name,
+        tableNo: table.tableNo,
+        matterIds: table.matterIds,
+        cellCount: table.cellCount,
+      }))
+
     return {
       generatedAt: "2026-06-29T00:00:00+09:00",
       移行先メタデータ: targetMetadata,
       メタデータマッピング情報: metadataMapping,
       共通メタ参照情報: commonMetaReferences,
       事項間参照情報: matterReferences,
+      移行対象統計データ: statData,
       データ移行用パラメータ: {
         対象事項数: targetMetadata.length,
         対象項目数: metadataMapping.items.length,
         共通メタ参照数: commonMetaReferences.length,
         事項間参照数: matterReferences.length,
+        対象統計データ数: statData.length,
+        対象統計データセル数: statData.reduce((sum, table) => sum + table.cellCount, 0),
       },
     }
-  }, [oldMatters, commonMeta, matterMappings, itemMappings, matterRefs])
+  }, [oldMatters, commonMeta, statTables, matterMappings, itemMappings, matterRefs, getTableReadiness])
 
   const json = JSON.stringify(output, null, 2)
   const summary = output.データ移行用パラメータ
@@ -122,6 +143,8 @@ export function GeneratedOutput() {
         <SummaryCard label="対象項目数" value={summary.対象項目数} />
         <SummaryCard label="共通メタ参照数" value={summary.共通メタ参照数} />
         <SummaryCard label="事項間参照数" value={summary.事項間参照数} />
+        <SummaryCard label="対象統計データ数" value={summary.対象統計データ数} />
+        <SummaryCard label="対象セル数" value={summary.対象統計データセル数} />
       </div>
 
       <Card className="gap-0 py-0">

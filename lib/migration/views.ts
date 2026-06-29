@@ -1,1 +1,7 @@
-export type ViewKey = "overview" | "mapping" | "common-meta" | "references" | "output"
+export type ViewKey =
+  | "overview"
+  | "mapping"
+  | "common-meta"
+  | "references"
+  | "data-migration"
+  | "output"
