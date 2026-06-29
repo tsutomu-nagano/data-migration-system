@@ -1,9 +1,23 @@
 "use client"
 
-import { ArrowDown, ArrowRight, CalendarClock, MousePointerClick } from "lucide-react"
-import { useEffect, useState } from "react"
+import {
+  ArrowRight,
+  CalendarClock,
+  Calculator,
+  GitBranch,
+  ListTree,
+  MapPin,
+  MousePointerClick,
+  Plus,
+  Ruler,
+  Tags,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
 import { CommonMetaSelector } from "@/components/common-meta-selector"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -19,18 +33,39 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { cn } from "@/lib/utils"
 import { useMigration } from "@/lib/migration/store"
+import type { ItemMappingPart, MatterCategory } from "@/lib/migration/types"
 
 interface ItemMappingProps {
   selectedMatterId: string | null
   onSelectMatter: (matterId: string) => void
 }
 
+const MATTER_CATEGORY_ICONS: Record<MatterCategory, LucideIcon> = {
+  分類事項: Tags,
+  地域事項: MapPin,
+  時間軸事項: CalendarClock,
+  集計事項: Calculator,
+  単位事項: Ruler,
+}
+
 export function ItemMapping({ selectedMatterId, onSelectMatter }: ItemMappingProps) {
-  const { oldMatters, matterMappings, itemMappings, updateItemMapping } = useMigration()
+  const {
+    oldMatters,
+    matterMappings,
+    itemMappings,
+    itemMappingRules,
+    updateItemMapping,
+    setItemMappingMode,
+    addItemMappingPart,
+    updateItemMappingPart,
+    removeItemMappingPart,
+  } = useMigration()
   const enabledMatters = oldMatters.filter((m) => matterMappings[m.id]?.enabled)
 
   const matter = oldMatters.find((m) => m.id === selectedMatterId) ?? null
   const [activeItemId, setActiveItemId] = useState<string | null>(null)
+
+  const matterById = useMemo(() => new Map(oldMatters.map((m) => [m.id, m])), [oldMatters])
 
   // 事項が切り替わったら先頭項目を選択
   useEffect(() => {
@@ -61,6 +96,8 @@ export function ItemMapping({ selectedMatterId, onSelectMatter }: ItemMappingPro
 
   const activeOld = matter?.items.find((i) => i.id === activeItemId) ?? null
   const activeNew = activeOld ? itemMappings[activeOld.id] : null
+  const activeRule = activeOld ? itemMappingRules[activeOld.id] : null
+  const splitCount = matter?.items.filter((item) => itemMappingRules[item.id]?.mode === "split").length ?? 0
 
   return (
     <div className="flex flex-col gap-6">
@@ -68,49 +105,61 @@ export function ItemMapping({ selectedMatterId, onSelectMatter }: ItemMappingPro
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight">項目マッピング</h1>
           <p className="text-sm text-muted-foreground text-pretty">
-            旧項目を基に新項目を作成します。各項目は任意で共通メタを参照できます。
+            旧項目と移行先の構成を横に並べて確認します。旧項目を複数の事項・項目へ分解する場合は、分割マッピングとして構成要素を追加します。
           </p>
         </div>
-        <div className="flex w-full max-w-sm flex-col gap-1.5">
-          <span className="text-xs font-medium text-muted-foreground">対象の事項</span>
-          <Select
-            value={selectedMatterId ?? ""}
-            onValueChange={(v) => onSelectMatter(v ?? "")}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="事項を選択">
-                {(value: string) => {
-                  const m = enabledMatters.find((x) => x.id === value)
-                  return m ? `${m.category}／${m.name}` : "事項を選択"
-                }}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {enabledMatters.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.category}／{m.name}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex w-full max-w-sm flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">対象の事項</span>
+            <Select
+              value={selectedMatterId ?? ""}
+              onValueChange={(v) => onSelectMatter(v ?? "")}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="事項を選択">
+                  {(value: string) => {
+                    const m = enabledMatters.find((x) => x.id === value)
+                    return m ? `${m.category}／${m.name}` : "事項を選択"
+                  }}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {enabledMatters.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.category}／{m.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          {matter ? (
+            <div className="grid grid-cols-3 gap-2 sm:min-w-[360px]">
+              <SummaryPill label="旧項目" value={matter.items.length} />
+              <SummaryPill label="1:1" value={matter.items.length - splitCount} />
+              <SummaryPill label="分割" value={splitCount} />
+            </div>
+          ) : null}
         </div>
       </header>
 
       {matter ? (
-        <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-          {/* 旧項目リスト */}
-          <Card className="h-fit gap-0 py-0">
+        <div className="grid gap-4 xl:grid-cols-[1fr_380px]">
+          <Card className="gap-0 py-0">
             <CardHeader className="flex flex-row items-center justify-between gap-2 border-b py-3">
-              <CardTitle className="text-sm">旧項目</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <ListTree className="size-4 text-primary" />
+                新旧対応の比較
+              </CardTitle>
               <Badge variant="secondary" className="font-mono">
                 {matter.items.length}
               </Badge>
             </CardHeader>
-            <CardContent className="flex flex-col p-1.5">
+            <CardContent className="flex flex-col gap-2 p-3">
               {matter.items.map((item) => {
                 const nm = itemMappings[item.id]
+                const rule = itemMappingRules[item.id]
                 const active = item.id === activeItemId
                 return (
                   <button
@@ -118,182 +167,91 @@ export function ItemMapping({ selectedMatterId, onSelectMatter }: ItemMappingPro
                     type="button"
                     onClick={() => setActiveItemId(item.id)}
                     className={cn(
-                      "flex flex-col items-start gap-0.5 rounded-md px-3 py-2 text-left transition-colors",
-                      active ? "bg-primary text-primary-foreground" : "hover:bg-muted",
+                      "grid gap-3 rounded-md border p-3 text-left transition-colors lg:grid-cols-[minmax(0,1fr)_40px_minmax(0,1.25fr)]",
+                      active ? "border-primary bg-primary/5" : "hover:bg-muted/50",
                     )}
                   >
-                    <div className="flex w-full items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{item.name}</span>
-                      <span
-                        className={cn(
-                          "font-mono text-xs",
-                          active ? "text-primary-foreground/70" : "text-muted-foreground",
-                        )}
-                      >
-                        {item.code}
-                      </span>
+                    <OldItemSummary item={item} />
+                    <div className="hidden items-center justify-center lg:flex">
+                      <ArrowRight className="size-4 text-muted-foreground" />
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      {item.period ? (
-                        <span
-                          className={cn(
-                            "flex items-center gap-0.5 text-[11px]",
-                            active ? "text-primary-foreground/80" : "text-muted-foreground",
-                          )}
-                        >
-                          <CalendarClock className="size-3" />
-                          {item.period}
-                        </span>
-                      ) : null}
-                      {nm?.commonMetaId ? (
-                        <span
-                          className={cn(
-                            "text-[11px]",
-                            active ? "text-primary-foreground/80" : "text-accent-foreground",
-                          )}
-                        >
-                          共通メタ参照あり
-                        </span>
-                      ) : null}
-                    </div>
+                    <MappingPreview
+                      parts={rule?.mode === "split" ? rule.parts : directPartsFromMapping(matter.id, nm)}
+                      mode={rule?.mode ?? "direct"}
+                      matterById={matterById}
+                    />
                   </button>
                 )
               })}
             </CardContent>
           </Card>
 
-          {/* マッピングエディタ */}
-          {activeOld && activeNew ? (
-            <div className="flex flex-col gap-4">
-              {activeOld.period ? (
-                <div className="flex items-start gap-2 rounded-md border border-accent bg-accent/40 px-3 py-2 text-xs text-accent-foreground">
-                  <CalendarClock className="mt-0.5 size-4 shrink-0" />
-                  <span className="text-pretty">
-                    地域事項は時点の概念を持ちます。同一名称でも基準時点（
-                    <span className="font-medium">{activeOld.period}</span>
-                    ）により地域コードが異なるため、時点を含めてマッピングしてください。
-                  </span>
+          {activeOld && activeNew && activeRule ? (
+            <Card className="h-fit gap-0 py-0">
+              <CardHeader className="border-b py-3">
+                <CardTitle className="text-sm">選択項目の詳細編集</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4 p-4">
+                <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3">
+                  <span className="text-xs font-medium text-muted-foreground">移行元</span>
+                  <OldItemSummary item={activeOld} compact />
                 </div>
-              ) : null}
 
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm text-muted-foreground">旧項目（移行元・変更不可）</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-                    <ReadonlyField label="項目名" value={activeOld.name} />
-                    <ReadonlyField label="コード" value={activeOld.code} mono />
-                    <ReadonlyField label="表示順" value={String(activeOld.order)} mono />
-                    <ReadonlyField label="時点" value={activeOld.period ?? "—"} />
+                {activeOld.period ? (
+                  <div className="flex items-start gap-2 rounded-md border border-accent bg-accent/40 px-3 py-2 text-xs text-accent-foreground">
+                    <CalendarClock className="mt-0.5 size-4 shrink-0" />
+                    <span className="text-pretty">
+                      地域事項は時点の概念を持ちます。同一名称でも基準時点（
+                      <span className="font-medium">{activeOld.period}</span>
+                      ）により地域コードが異なるため、時点を含めてマッピングしてください。
+                    </span>
                   </div>
-                </CardContent>
-              </Card>
+                ) : null}
 
-              <div className="flex justify-center">
-                <span className="flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground">
-                  <ArrowDown className="size-3.5" />
-                  新規作成
-                </span>
-              </div>
+                <Field>
+                  <FieldLabel>対応方式</FieldLabel>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant={activeRule.mode === "direct" ? "default" : "outline"}
+                      onClick={() => setItemMappingMode(activeOld.id, "direct")}
+                    >
+                      <ArrowRight data-icon="inline-start" />
+                      1:1
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={activeRule.mode === "split" ? "default" : "outline"}
+                      onClick={() => setItemMappingMode(activeOld.id, "split")}
+                    >
+                      <GitBranch data-icon="inline-start" />
+                      分割
+                    </Button>
+                  </div>
+                </Field>
 
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-center gap-2 text-sm">
-                    <span className="size-2 rounded-full bg-primary" />
-                    新項目（新規作成）
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <FieldGroup className="gap-4">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <Field>
-                        <FieldLabel htmlFor="new-name">項目名</FieldLabel>
-                        <Input
-                          id="new-name"
-                          value={activeNew.newName}
-                          onChange={(e) =>
-                            updateItemMapping(activeOld.id, { newName: e.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="new-code">コード</FieldLabel>
-                        <Input
-                          id="new-code"
-                          className="font-mono"
-                          value={activeNew.code}
-                          onChange={(e) =>
-                            updateItemMapping(activeOld.id, { code: e.target.value })
-                          }
-                        />
-                      </Field>
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <Field>
-                        <FieldLabel htmlFor="new-order">表示順</FieldLabel>
-                        <Input
-                          id="new-order"
-                          type="number"
-                          className="font-mono"
-                          value={activeNew.order}
-                          onChange={(e) =>
-                            updateItemMapping(activeOld.id, {
-                              order: Number(e.target.value) || 0,
-                            })
-                          }
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor="new-parent">親項目</FieldLabel>
-                        <Select
-                          value={activeNew.parentId ?? "__none__"}
-                          onValueChange={(v) =>
-                            updateItemMapping(activeOld.id, {
-                              parentId: !v || v === "__none__" ? null : v,
-                            })
-                          }
-                        >
-                          <SelectTrigger id="new-parent">
-                            <SelectValue placeholder="親項目を選択">
-                              {(value: string) => {
-                                if (!value || value === "__none__") return "なし（最上位）"
-                                const p = matter.items.find((i) => i.id === value)
-                                return p ? (itemMappings[p.id]?.newName ?? p.name) : "なし（最上位）"
-                              }}
-                            </SelectValue>
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              <SelectItem value="__none__">なし（最上位）</SelectItem>
-                              {matter.items
-                                .filter((i) => i.id !== activeOld.id)
-                                .map((i) => (
-                                  <SelectItem key={i.id} value={i.id}>
-                                    {itemMappings[i.id]?.newName ?? i.name}
-                                  </SelectItem>
-                                ))}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                    </div>
-
-                    <Separator />
-
-                    <Field>
-                      <FieldLabel>共通メタ参照（任意）</FieldLabel>
-                      <CommonMetaSelector
-                        value={activeNew.commonMetaId}
-                        onChange={(v) =>
-                          updateItemMapping(activeOld.id, { commonMetaId: v })
-                        }
-                      />
-                    </Field>
-                  </FieldGroup>
-                </CardContent>
-              </Card>
-            </div>
+                {activeRule.mode === "direct" ? (
+                  <DirectMappingEditor
+                    oldItemId={activeOld.id}
+                    activeNew={activeNew}
+                    items={matter.items}
+                    itemMappings={itemMappings}
+                    updateItemMapping={updateItemMapping}
+                  />
+                ) : (
+                  <SplitMappingEditor
+                    oldItemId={activeOld.id}
+                    parts={activeRule.parts}
+                    enabledMatters={enabledMatters}
+                    itemMappings={itemMappings}
+                    matterById={matterById}
+                    addItemMappingPart={addItemMappingPart}
+                    updateItemMappingPart={updateItemMappingPart}
+                    removeItemMappingPart={removeItemMappingPart}
+                  />
+                )}
+              </CardContent>
+            </Card>
           ) : null}
         </div>
       ) : (
@@ -311,19 +269,348 @@ export function ItemMapping({ selectedMatterId, onSelectMatter }: ItemMappingPro
   )
 }
 
-function ReadonlyField({
-  label,
-  value,
-  mono,
-}: {
-  label: string
-  value: string
-  mono?: boolean
-}) {
+function SummaryPill({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={cn("text-sm", mono && "font-mono")}>{value}</span>
+    <div className="rounded-md border bg-card px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="font-mono text-lg font-semibold tabular-nums">{value}</div>
     </div>
   )
+}
+
+function OldItemSummary({
+  item,
+  compact,
+}: {
+  item: { name: string; code: string; order: number; period?: string }
+  compact?: boolean
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <span className={cn("min-w-0 truncate font-medium", compact ? "text-sm" : "text-base")}>{item.name}</span>
+        <Badge variant="outline" className="font-mono">
+          {item.code}
+        </Badge>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span className="font-mono">表示順 {item.order}</span>
+        {item.period ? (
+          <span className="flex items-center gap-1">
+            <CalendarClock className="size-3" />
+            {item.period}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function MappingPreview({
+  mode,
+  parts,
+  matterById,
+}: {
+  mode: "direct" | "split"
+  parts: ItemMappingPart[]
+  matterById: Map<string, { category: MatterCategory; name: string }>
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <Badge variant={mode === "split" ? "default" : "secondary"} className="gap-1">
+          {mode === "split" ? <GitBranch className="size-3" /> : <ArrowRight className="size-3" />}
+          {mode === "split" ? "分割" : "1:1"}
+        </Badge>
+        <span className="text-xs text-muted-foreground">移行先構成</span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {parts.length ? (
+          parts.map((part) => {
+            const targetMatter = matterById.get(part.targetMatterId)
+            const Icon = targetMatter ? MATTER_CATEGORY_ICONS[targetMatter.category] : ListTree
+            return (
+              <div key={part.id} className="flex min-w-0 items-center gap-2 rounded-md bg-background px-2 py-1.5 ring-1 ring-border">
+                <Icon className="size-4 shrink-0 text-primary" />
+                <span className="min-w-0 truncate text-sm">
+                  {targetMatter ? `${targetMatter.category}: ` : "未設定: "}
+                  <span className="font-medium">{part.name || "名称未設定"}</span>
+                </span>
+                {part.code ? <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">{part.code}</span> : null}
+              </div>
+            )
+          })
+        ) : (
+          <div className="rounded-md border border-dashed px-2 py-2 text-xs text-muted-foreground">
+            移行先構成が未設定です。
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function DirectMappingEditor({
+  oldItemId,
+  activeNew,
+  items,
+  itemMappings,
+  updateItemMapping,
+}: {
+  oldItemId: string
+  activeNew: { newName: string; code: string; parentId: string | null; order: number; commonMetaId: string | null }
+  items: { id: string; name: string }[]
+  itemMappings: Record<string, { newName: string }>
+  updateItemMapping: (oldItemId: string, patch: {
+    newName?: string
+    code?: string
+    parentId?: string | null
+    order?: number
+    commonMetaId?: string | null
+  }) => void
+}) {
+  return (
+    <FieldGroup className="gap-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field>
+          <FieldLabel htmlFor="new-name">新項目名</FieldLabel>
+          <Input
+            id="new-name"
+            value={activeNew.newName}
+            onChange={(e) => updateItemMapping(oldItemId, { newName: e.target.value })}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="new-code">コード</FieldLabel>
+          <Input
+            id="new-code"
+            className="font-mono"
+            value={activeNew.code}
+            onChange={(e) => updateItemMapping(oldItemId, { code: e.target.value })}
+          />
+        </Field>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field>
+          <FieldLabel htmlFor="new-order">表示順</FieldLabel>
+          <Input
+            id="new-order"
+            type="number"
+            className="font-mono"
+            value={activeNew.order}
+            onChange={(e) => updateItemMapping(oldItemId, { order: Number(e.target.value) || 0 })}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="new-parent">親項目</FieldLabel>
+          <Select
+            value={activeNew.parentId ?? "__none__"}
+            onValueChange={(v) => updateItemMapping(oldItemId, { parentId: !v || v === "__none__" ? null : v })}
+          >
+            <SelectTrigger id="new-parent">
+              <SelectValue placeholder="親項目を選択">
+                {(value: string) => {
+                  if (!value || value === "__none__") return "なし（最上位）"
+                  const p = items.find((i) => i.id === value)
+                  return p ? (itemMappings[p.id]?.newName ?? p.name) : "なし（最上位）"
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="__none__">なし（最上位）</SelectItem>
+                {items
+                  .filter((i) => i.id !== oldItemId)
+                  .map((i) => (
+                    <SelectItem key={i.id} value={i.id}>
+                      {itemMappings[i.id]?.newName ?? i.name}
+                    </SelectItem>
+                  ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <Separator />
+      <Field>
+        <FieldLabel>共通メタ参照（任意）</FieldLabel>
+        <CommonMetaSelector
+          value={activeNew.commonMetaId}
+          onChange={(v) => updateItemMapping(oldItemId, { commonMetaId: v })}
+        />
+      </Field>
+    </FieldGroup>
+  )
+}
+
+function SplitMappingEditor({
+  oldItemId,
+  parts,
+  enabledMatters,
+  itemMappings,
+  matterById,
+  addItemMappingPart,
+  updateItemMappingPart,
+  removeItemMappingPart,
+}: {
+  oldItemId: string
+  parts: ItemMappingPart[]
+  enabledMatters: { id: string; category: MatterCategory; name: string; items: { id: string; name: string; code: string }[] }[]
+  itemMappings: Record<string, { newName: string; code: string }>
+  matterById: Map<string, { category: MatterCategory; name: string }>
+  addItemMappingPart: (oldItemId: string, part?: Partial<ItemMappingPart>) => void
+  updateItemMappingPart: (oldItemId: string, partId: string, patch: Partial<ItemMappingPart>) => void
+  removeItemMappingPart: (oldItemId: string, partId: string) => void
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm font-medium">分割後の移行先構成</span>
+          <span className="text-xs text-muted-foreground">例: 集計事項「従業者数」 + 分類事項「性別／男」</span>
+        </div>
+        <Button size="sm" type="button" onClick={() => addItemMappingPart(oldItemId)}>
+          <Plus data-icon="inline-start" />
+          追加
+        </Button>
+      </div>
+
+      {parts.length === 0 ? (
+        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          分割先を追加してください。
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-3">
+        {parts.map((part, index) => {
+          const targetMatter = matterById.get(part.targetMatterId)
+          const targetMatterItems = enabledMatters.find((m) => m.id === part.targetMatterId)?.items ?? []
+          return (
+            <div key={part.id} className="flex flex-col gap-3 rounded-md border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <Badge variant="secondary" className="font-mono">#{index + 1}</Badge>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => removeItemMappingPart(oldItemId, part.id)}
+                >
+                  <Trash2 data-icon="inline-start" />
+                  削除
+                </Button>
+              </div>
+              <Field>
+                <FieldLabel>分解先の事項</FieldLabel>
+                <Select
+                  value={part.targetMatterId || "__none__"}
+                  onValueChange={(value) => {
+                    const selectedValue = value ?? "__none__"
+                    const nextMatterId = selectedValue === "__none__" ? "" : selectedValue
+                    updateItemMappingPart(oldItemId, part.id, {
+                      targetMatterId: nextMatterId,
+                      targetItemId: null,
+                      name: "",
+                      code: "",
+                    })
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="事項を選択">
+                      {(value: string) => {
+                        if (!value || value === "__none__") return "事項を選択"
+                        const matter = matterById.get(value)
+                        return matter ? `${matter.category}／${matter.name}` : "事項を選択"
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="__none__">事項を選択</SelectItem>
+                      {enabledMatters.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.category}／{m.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field>
+                <FieldLabel>分解先の項目</FieldLabel>
+                <Select
+                  value={part.targetItemId ?? "__custom__"}
+                  onValueChange={(value) => {
+                    const selectedValue = value ?? "__custom__"
+                    if (selectedValue === "__custom__") {
+                      updateItemMappingPart(oldItemId, part.id, { targetItemId: null, name: "", code: "" })
+                      return
+                    }
+                    const item = targetMatterItems.find((i) => i.id === selectedValue)
+                    updateItemMappingPart(oldItemId, part.id, {
+                      targetItemId: selectedValue,
+                      name: itemMappings[selectedValue]?.newName ?? item?.name ?? "",
+                      code: itemMappings[selectedValue]?.code ?? item?.code ?? "",
+                    })
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="項目を選択">
+                      {(value: string) => {
+                        if (!targetMatter) return "先に事項を選択"
+                        if (!value || value === "__custom__") return "手入力"
+                        const item = targetMatterItems.find((i) => i.id === value)
+                        return item ? (itemMappings[item.id]?.newName ?? item.name) : "手入力"
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="__custom__">手入力</SelectItem>
+                      {targetMatterItems.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {itemMappings[item.id]?.newName ?? item.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field>
+                  <FieldLabel>名称</FieldLabel>
+                  <Input
+                    value={part.name}
+                    onChange={(e) => updateItemMappingPart(oldItemId, part.id, { name: e.target.value })}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel>コード</FieldLabel>
+                  <Input
+                    className="font-mono"
+                    value={part.code}
+                    onChange={(e) => updateItemMappingPart(oldItemId, part.id, { code: e.target.value })}
+                  />
+                </Field>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function directPartsFromMapping(targetMatterId: string, mapping?: { oldItemId: string; newName: string; code: string }): ItemMappingPart[] {
+  if (!mapping) return []
+  return [
+    {
+      id: `${mapping.oldItemId}_direct_preview`,
+      targetMatterId,
+      targetItemId: mapping.oldItemId,
+      name: mapping.newName,
+      code: mapping.code,
+    },
+  ]
 }

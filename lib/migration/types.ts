@@ -64,6 +64,27 @@ export interface NewItemMapping {
   commonMetaId: string | null
 }
 
+/** 旧項目をどのように移行先へ対応させるか */
+export type ItemMappingMode = "direct" | "split"
+
+/** 旧項目を分解した移行先構成要素 */
+export interface ItemMappingPart {
+  id: string
+  /** 分解先の事項ID */
+  targetMatterId: string
+  /** 既存の新項目に紐づく場合の旧項目ID */
+  targetItemId: string | null
+  name: string
+  code: string
+}
+
+/** 旧項目ごとの対応ルール。direct は従来の 1:1、split は 1:N 分解。 */
+export interface ItemMappingRule {
+  oldItemId: string
+  mode: ItemMappingMode
+  parts: ItemMappingPart[]
+}
+
 /** 事項間参照 */
 export interface MatterReference {
   id: string
