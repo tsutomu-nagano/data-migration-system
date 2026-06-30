@@ -15,6 +15,16 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import {
+  Background,
+  Controls,
+  MarkerType,
+  MiniMap,
+  Position,
+  ReactFlow,
+  type Edge,
+  type Node,
+} from "@xyflow/react"
 import { CommonMetaSelector } from "@/components/common-meta-selector"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -150,39 +160,21 @@ export function ItemMapping({ selectedMatterId, onSelectMatter }: ItemMappingPro
             <CardHeader className="flex flex-row items-center justify-between gap-2 border-b py-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <ListTree className="size-4 text-primary" />
-                新旧対応の比較
+                新旧対応フロー
               </CardTitle>
               <Badge variant="secondary" className="font-mono">
                 {matter.items.length}
               </Badge>
             </CardHeader>
-            <CardContent className="flex flex-col gap-2 p-3">
-              {matter.items.map((item) => {
-                const nm = itemMappings[item.id]
-                const rule = itemMappingRules[item.id]
-                const active = item.id === activeItemId
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setActiveItemId(item.id)}
-                    className={cn(
-                      "grid gap-3 rounded-md border p-3 text-left transition-colors lg:grid-cols-[minmax(0,1fr)_40px_minmax(0,1.25fr)]",
-                      active ? "border-primary bg-primary/5" : "hover:bg-muted/50",
-                    )}
-                  >
-                    <OldItemSummary item={item} />
-                    <div className="hidden items-center justify-center lg:flex">
-                      <ArrowRight className="size-4 text-muted-foreground" />
-                    </div>
-                    <MappingPreview
-                      parts={rule?.mode === "split" ? rule.parts : directPartsFromMapping(matter.id, nm)}
-                      mode={rule?.mode ?? "direct"}
-                      matterById={matterById}
-                    />
-                  </button>
-                )
-              })}
+            <CardContent className="p-0">
+              <ItemMappingFlow
+                matter={matter}
+                activeItemId={activeItemId}
+                itemMappings={itemMappings}
+                itemMappingRules={itemMappingRules}
+                matterById={matterById}
+                onSelectItem={setActiveItemId}
+              />
             </CardContent>
           </Card>
 
@@ -265,6 +257,182 @@ export function ItemMapping({ selectedMatterId, onSelectMatter }: ItemMappingPro
           </EmptyHeader>
         </Empty>
       )}
+    </div>
+  )
+}
+
+function ItemMappingFlow({
+  matter,
+  activeItemId,
+  itemMappings,
+  itemMappingRules,
+  matterById,
+  onSelectItem,
+}: {
+  matter: { id: string; items: Array<{ id: string; name: string; code: string; order: number; period?: string }> }
+  activeItemId: string | null
+  itemMappings: Record<string, { oldItemId: string; newName: string; code: string }>
+  itemMappingRules: Record<string, { mode: "direct" | "split"; parts: ItemMappingPart[] }>
+  matterById: Map<string, { category: MatterCategory; name: string }>
+  onSelectItem: (itemId: string) => void
+}) {
+  const { nodes, edges } = useMemo(() => {
+    const nextNodes: Node[] = []
+    const nextEdges: Edge[] = []
+    const rowHeight = 132
+    const splitGap = 74
+
+    matter.items.forEach((item, itemIndex) => {
+      const rule = itemMappingRules[item.id]
+      const parts = rule?.mode === "split"
+        ? rule.parts
+        : directPartsFromMapping(matter.id, itemMappings[item.id])
+      const partCount = Math.max(parts.length, 1)
+      const rowY = itemIndex * rowHeight
+      const groupOffset = ((partCount - 1) * splitGap) / 2
+      const active = item.id === activeItemId
+
+      nextNodes.push({
+        id: `old-${item.id}`,
+        type: "input",
+        sourcePosition: Position.Right,
+        position: { x: 16, y: rowY },
+        data: {
+          label: (
+            <FlowItemNode
+              title={item.name}
+              code={item.code}
+              meta={`表示順 ${item.order}${item.period ? ` / ${item.period}` : ""}`}
+              selected={active}
+              tone="source"
+            />
+          ),
+        },
+        className: "item-flow-node",
+      })
+
+      if (parts.length === 0) {
+        nextNodes.push({
+          id: `empty-${item.id}`,
+          type: "output",
+          targetPosition: Position.Left,
+          position: { x: 460, y: rowY },
+          data: {
+            label: (
+              <FlowItemNode
+                title="移行先未設定"
+                code=""
+                meta="分割先を追加してください"
+                selected={active}
+                tone="empty"
+              />
+            ),
+          },
+          className: "item-flow-node",
+        })
+        nextEdges.push(edgeFor(item.id, `old-${item.id}`, `empty-${item.id}`, active, true))
+        return
+      }
+
+      parts.forEach((part, partIndex) => {
+        const targetMatter = matterById.get(part.targetMatterId)
+        const nodeId = `part-${item.id}-${part.id}`
+        nextNodes.push({
+          id: nodeId,
+          type: "output",
+          targetPosition: Position.Left,
+          position: { x: 460, y: rowY + partIndex * splitGap - groupOffset },
+          data: {
+            label: (
+              <FlowItemNode
+                title={part.name || "名称未設定"}
+                code={part.code}
+                meta={targetMatter ? `${targetMatter.category} / ${targetMatter.name}` : "事項未設定"}
+                selected={active}
+                tone={rule?.mode === "split" ? "split" : "target"}
+              />
+            ),
+          },
+          className: "item-flow-node",
+        })
+        nextEdges.push(edgeFor(item.id, `old-${item.id}`, nodeId, active, rule?.mode === "split"))
+      })
+    })
+
+    return { nodes: nextNodes, edges: nextEdges }
+  }, [activeItemId, itemMappingRules, itemMappings, matter.id, matter.items, matterById])
+
+  return (
+    <div className="h-[620px] min-h-[420px] overflow-hidden rounded-b-md bg-muted/20">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        fitView
+        minZoom={0.45}
+        maxZoom={1.35}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable
+        proOptions={{ hideAttribution: true }}
+        onNodeClick={(_, node) => {
+          const match = /^old-(.+)$/.exec(node.id) ?? /^part-(.+?)-/.exec(node.id) ?? /^empty-(.+)$/.exec(node.id)
+          if (match?.[1]) onSelectItem(match[1])
+        }}
+      >
+        <Background gap={18} size={1} />
+        <MiniMap pannable zoomable nodeStrokeWidth={3} />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
+  )
+}
+
+function edgeFor(itemId: string, source: string, target: string, active: boolean, split?: boolean): Edge {
+  return {
+    id: `${source}-${target}-${itemId}`,
+    source,
+    target,
+    animated: active,
+    type: "smoothstep",
+    markerEnd: { type: MarkerType.ArrowClosed },
+    style: {
+      strokeWidth: active ? 3 : 2,
+      stroke: active ? "var(--primary)" : split ? "var(--chart-2)" : "var(--border)",
+    },
+  }
+}
+
+function FlowItemNode({
+  title,
+  code,
+  meta,
+  selected,
+  tone,
+}: {
+  title: string
+  code: string
+  meta: string
+  selected: boolean
+  tone: "source" | "target" | "split" | "empty"
+}) {
+  return (
+    <div
+      className={cn(
+        "flex w-[260px] flex-col gap-2 rounded-md border bg-card px-3 py-2 text-left shadow-sm",
+        selected && "border-primary ring-2 ring-primary/20",
+        tone === "split" && "border-accent bg-accent/30",
+        tone === "empty" && "border-dashed bg-background/70 text-muted-foreground",
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
+        {code ? (
+          <Badge variant="outline" className="shrink-0 font-mono text-[10px]">
+            {code}
+          </Badge>
+        ) : null}
+      </div>
+      <span className="truncate text-xs text-muted-foreground">{meta}</span>
     </div>
   )
 }
