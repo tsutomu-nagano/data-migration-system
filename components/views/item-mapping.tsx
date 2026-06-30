@@ -14,9 +14,10 @@ import {
   Trash2,
   type LucideIcon,
 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Background,
+  type Connection,
   Controls,
   MarkerType,
   MiniMap,
@@ -174,6 +175,9 @@ export function ItemMapping({ selectedMatterId, onSelectMatter }: ItemMappingPro
                 itemMappingRules={itemMappingRules}
                 matterById={matterById}
                 onSelectItem={setActiveItemId}
+                setItemMappingMode={setItemMappingMode}
+                updateItemMapping={updateItemMapping}
+                updateItemMappingPart={updateItemMappingPart}
               />
             </CardContent>
           </Card>
@@ -268,35 +272,92 @@ function ItemMappingFlow({
   itemMappingRules,
   matterById,
   onSelectItem,
+  setItemMappingMode,
+  updateItemMapping,
+  updateItemMappingPart,
 }: {
-  matter: { id: string; items: Array<{ id: string; name: string; code: string; order: number; period?: string }> }
+  matter: { id: string; items: Array<{ id: string; name: string; code: string; parentId: string | null; order: number; period?: string }> }
   activeItemId: string | null
-  itemMappings: Record<string, { oldItemId: string; newName: string; code: string }>
+  itemMappings: Record<string, { oldItemId: string; newName: string; code: string; parentId: string | null; order: number; commonMetaId: string | null }>
   itemMappingRules: Record<string, { mode: "direct" | "split"; parts: ItemMappingPart[] }>
   matterById: Map<string, { category: MatterCategory; name: string }>
   onSelectItem: (itemId: string) => void
+  setItemMappingMode: (oldItemId: string, mode: "direct" | "split") => void
+  updateItemMapping: (oldItemId: string, patch: {
+    newName?: string
+    code?: string
+    parentId?: string | null
+    order?: number
+    commonMetaId?: string | null
+  }) => void
+  updateItemMappingPart: (oldItemId: string, partId: string, patch: Partial<ItemMappingPart>) => void
 }) {
+  const itemById = useMemo(() => new Map(matter.items.map((item) => [item.id, item])), [matter.items])
+
+  const itemIdByMappedValue = useMemo(() => {
+    const next = new Map<string, string>()
+    for (const item of matter.items) {
+      const mapping = itemMappings[item.id]
+      next.set(mappingKey(mapping?.newName ?? item.name, mapping?.code ?? item.code), item.id)
+    }
+    return next
+  }, [itemMappings, matter.items])
+
+  const applyConnection = useCallback((edge: Edge | null, connection: Connection) => {
+    if (!connection.source || !connection.target) return
+    const oldItemId = oldItemIdFromNodeId(connection.source)
+    const targetItemId = targetItemIdFromNodeId(connection.target)
+    const targetItem = targetItemId ? itemById.get(targetItemId) : null
+    if (!oldItemId || !targetItem) return
+
+    onSelectItem(oldItemId)
+
+    const patch = {
+      targetMatterId: matter.id,
+      targetItemId: targetItem.id,
+      name: itemMappings[targetItem.id]?.newName ?? targetItem.name,
+      code: itemMappings[targetItem.id]?.code ?? targetItem.code,
+    }
+
+    const partId = edge ? splitPartIdFromEdgeId(edge.id) : null
+    if (partId) {
+      updateItemMappingPart(oldItemId, partId, patch)
+      return
+    }
+
+    setItemMappingMode(oldItemId, "direct")
+    updateItemMapping(oldItemId, {
+      newName: patch.name,
+      code: patch.code,
+      parentId: itemMappings[targetItem.id]?.parentId ?? targetItem.parentId,
+      order: itemMappings[targetItem.id]?.order ?? targetItem.order,
+    })
+  }, [
+    itemById,
+    itemMappings,
+    matter.id,
+    onSelectItem,
+    setItemMappingMode,
+    updateItemMapping,
+    updateItemMappingPart,
+  ])
+
   const { nodes, edges } = useMemo(() => {
     const nextNodes: Node[] = []
     const nextEdges: Edge[] = []
-    const rowHeight = 132
-    const splitGap = 74
+    const rowHeight = 118
+    const targetX = 560
 
     matter.items.forEach((item, itemIndex) => {
-      const rule = itemMappingRules[item.id]
-      const parts = rule?.mode === "split"
-        ? rule.parts
-        : directPartsFromMapping(matter.id, itemMappings[item.id])
-      const partCount = Math.max(parts.length, 1)
-      const rowY = itemIndex * rowHeight
-      const groupOffset = ((partCount - 1) * splitGap) / 2
+      const mapping = itemMappings[item.id]
       const active = item.id === activeItemId
+      const rowY = itemIndex * rowHeight
 
       nextNodes.push({
         id: `old-${item.id}`,
         type: "input",
         sourcePosition: Position.Right,
-        position: { x: 16, y: rowY },
+        position: { x: 20, y: rowY },
         data: {
           label: (
             <FlowItemNode
@@ -311,12 +372,65 @@ function ItemMappingFlow({
         className: "item-flow-node",
       })
 
-      if (parts.length === 0) {
+      nextNodes.push({
+        id: `target-${item.id}`,
+        type: "output",
+        targetPosition: Position.Left,
+        position: { x: targetX, y: rowY },
+        data: {
+          label: (
+            <FlowItemNode
+              title={mapping?.newName ?? item.name}
+              code={mapping?.code ?? item.code}
+              meta="移行先候補"
+              selected={active}
+              tone="target"
+            />
+          ),
+        },
+        className: "item-flow-node",
+      })
+    })
+
+    matter.items.forEach((item, itemIndex) => {
+      const rule = itemMappingRules[item.id]
+      const rowY = itemIndex * rowHeight
+      const active = item.id === activeItemId
+
+      if (rule?.mode !== "split") {
+        const mapping = itemMappings[item.id]
+        const targetItemId = itemIdByMappedValue.get(mappingKey(mapping?.newName ?? item.name, mapping?.code ?? item.code))
+        const targetNodeId = targetItemId ? `target-${targetItemId}` : `custom-${item.id}`
+        if (!targetItemId) {
+          nextNodes.push({
+            id: targetNodeId,
+            type: "output",
+            targetPosition: Position.Left,
+            position: { x: targetX, y: rowY + 38 },
+            data: {
+              label: (
+                <FlowItemNode
+                  title={mapping?.newName ?? "名称未設定"}
+                  code={mapping?.code ?? ""}
+                  meta="手入力"
+                  selected={active}
+                  tone="empty"
+                />
+              ),
+            },
+            className: "item-flow-node",
+          })
+        }
+        nextEdges.push(edgeFor(`direct-${item.id}`, `old-${item.id}`, targetNodeId, active))
+        return
+      }
+
+      if (rule.parts.length === 0) {
         nextNodes.push({
           id: `empty-${item.id}`,
           type: "output",
           targetPosition: Position.Left,
-          position: { x: 460, y: rowY },
+          position: { x: targetX, y: rowY + 38 },
           data: {
             label: (
               <FlowItemNode
@@ -330,50 +444,61 @@ function ItemMappingFlow({
           },
           className: "item-flow-node",
         })
-        nextEdges.push(edgeFor(item.id, `old-${item.id}`, `empty-${item.id}`, active, true))
+        nextEdges.push(edgeFor(`split-empty-${item.id}`, `old-${item.id}`, `empty-${item.id}`, active, true))
         return
       }
 
-      parts.forEach((part, partIndex) => {
+      rule.parts.forEach((part, partIndex) => {
         const targetMatter = matterById.get(part.targetMatterId)
-        const nodeId = `part-${item.id}-${part.id}`
-        nextNodes.push({
-          id: nodeId,
-          type: "output",
-          targetPosition: Position.Left,
-          position: { x: 460, y: rowY + partIndex * splitGap - groupOffset },
-          data: {
-            label: (
-              <FlowItemNode
-                title={part.name || "名称未設定"}
-                code={part.code}
-                meta={targetMatter ? `${targetMatter.category} / ${targetMatter.name}` : "事項未設定"}
-                selected={active}
-                tone={rule?.mode === "split" ? "split" : "target"}
-              />
-            ),
-          },
-          className: "item-flow-node",
-        })
-        nextEdges.push(edgeFor(item.id, `old-${item.id}`, nodeId, active, rule?.mode === "split"))
+        const targetItemId = part.targetMatterId === matter.id && part.targetItemId
+          ? part.targetItemId
+          : itemIdByMappedValue.get(mappingKey(part.name, part.code))
+        let targetNodeId = targetItemId ? `target-${targetItemId}` : `part-${item.id}-${part.id}`
+
+        if (!targetItemId) {
+          targetNodeId = `part-${item.id}-${part.id}`
+          nextNodes.push({
+            id: targetNodeId,
+            type: "output",
+            targetPosition: Position.Left,
+            position: { x: targetX, y: rowY + 46 + partIndex * 74 },
+            data: {
+              label: (
+                <FlowItemNode
+                  title={part.name || "名称未設定"}
+                  code={part.code}
+                  meta={targetMatter ? `${targetMatter.category} / ${targetMatter.name}` : "事項未設定"}
+                  selected={active}
+                  tone="split"
+                />
+              ),
+            },
+            className: "item-flow-node",
+          })
+        }
+
+        nextEdges.push(edgeFor(`split|${item.id}|${part.id}`, `old-${item.id}`, targetNodeId, active, true))
       })
     })
 
     return { nodes: nextNodes, edges: nextEdges }
-  }, [activeItemId, itemMappingRules, itemMappings, matter.id, matter.items, matterById])
+  }, [activeItemId, itemIdByMappedValue, itemMappingRules, itemMappings, matter.id, matter.items, matterById])
 
   return (
-    <div className="h-[620px] min-h-[420px] overflow-hidden rounded-b-md bg-muted/20">
+    <div className="h-[680px] min-h-[460px] overflow-hidden rounded-b-md bg-muted/20">
       <ReactFlow
         nodes={nodes}
         edges={edges}
         fitView
-        minZoom={0.45}
+        minZoom={0.35}
         maxZoom={1.35}
         nodesDraggable={false}
-        nodesConnectable={false}
+        nodesConnectable
+        edgesReconnectable
         elementsSelectable
         proOptions={{ hideAttribution: true }}
+        onConnect={(connection) => applyConnection(null, connection)}
+        onReconnect={applyConnection}
         onNodeClick={(_, node) => {
           const match = /^old-(.+)$/.exec(node.id) ?? /^part-(.+?)-/.exec(node.id) ?? /^empty-(.+)$/.exec(node.id)
           if (match?.[1]) onSelectItem(match[1])
@@ -387,9 +512,9 @@ function ItemMappingFlow({
   )
 }
 
-function edgeFor(itemId: string, source: string, target: string, active: boolean, split?: boolean): Edge {
+function edgeFor(id: string, source: string, target: string, active: boolean, split?: boolean): Edge {
   return {
-    id: `${source}-${target}-${itemId}`,
+    id,
     source,
     target,
     animated: active,
@@ -400,6 +525,22 @@ function edgeFor(itemId: string, source: string, target: string, active: boolean
       stroke: active ? "var(--primary)" : split ? "var(--chart-2)" : "var(--border)",
     },
   }
+}
+
+function mappingKey(name: string, code: string): string {
+  return `${name}\u0000${code}`
+}
+
+function oldItemIdFromNodeId(nodeId: string): string | null {
+  return /^old-(.+)$/.exec(nodeId)?.[1] ?? null
+}
+
+function targetItemIdFromNodeId(nodeId: string): string | null {
+  return /^target-(.+)$/.exec(nodeId)?.[1] ?? null
+}
+
+function splitPartIdFromEdgeId(edgeId: string): string | null {
+  return /^split\|.+\|(.+)$/.exec(edgeId)?.[1] ?? null
 }
 
 function FlowItemNode({

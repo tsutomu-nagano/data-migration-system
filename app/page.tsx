@@ -25,7 +25,7 @@ export default function Page() {
       <div className="flex min-h-dvh">
         <AppSidebar view={view} onNavigate={setView} />
         <main className="flex-1 overflow-x-hidden">
-          <div className="mx-auto max-w-5xl px-6 py-8 lg:px-10">
+          <div className="mx-auto max-w-7xl px-6 py-8 lg:px-10">
             {view === "overview" && <MattersOverview onOpenMapping={openMapping} />}
             {view === "mapping" && (
               <ItemMapping
